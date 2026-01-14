@@ -5,22 +5,29 @@ from datetime import datetime
 import pandas as pd
 import random
 import json
+import os
 
-# 1. SECURE DATABASE CONNECTION
+# 1. SMART DATABASE CONNECTION
 if not firebase_admin._apps:
-    # This reads the key from Streamlit's internal "Secrets" settings
-    if "firebase" in st.secrets:
-        key_dict = json.loads(st.secrets["firebase"])
+    # Try Railway/Cloud Environment Variable first
+    firebase_key = os.environ.get("FIREBASE_KEY")
+    
+    if firebase_key:
+        # If running on Railway
+        key_dict = json.loads(firebase_key)
         cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred)
     else:
-        # Fallback for local testing
-        cred = credentials.Certificate("serviceAccountKey.json")
-        firebase_admin.initialize_app(cred)
+        # If running locally on your computer
+        try:
+            cred = credentials.Certificate("serviceAccountKey.json")
+            firebase_admin.initialize_app(cred)
+        except Exception as e:
+            st.error("Firebase Key not found. Please set FIREBASE_KEY in Railway Variables.")
 
 db = firestore.client()
 
-# --- THE REST OF YOUR WORKING CODE ---
+# --- UI CONFIGURATION ---
 st.set_page_config(page_title="SPMS Pro Dashboard", layout="wide")
 
 st.markdown("""
@@ -36,6 +43,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- BACKEND FUNCTIONS ---
 def get_data():
     slots = db.collection('parking_slots').order_by("spot_number").stream()
     return [{"id": slot.id, **slot.to_dict()} for slot in slots]
@@ -51,11 +59,14 @@ def log_transaction(slot_no, amount, tx_id):
         "slot": slot_no, "amount": amount, "tx_id": tx_id, "timestamp": datetime.now()
     })
 
+# --- DATA FETCHING ---
 data = get_data()
 total = len(data)
 occ = sum(1 for s in data if s['status'] == 'occupied')
+# Dynamic Pricing Logic
 current_rate = 15.0 + (5.0 if (total > 0 and occ/total > 0.7) else 0.0)
 
+# --- SIDEBAR (CRUD) ---
 st.sidebar.header("🏗️ Facility Admin")
 tab_add, tab_edit, tab_del = st.sidebar.tabs(["Add", "Edit", "Delete"])
 
@@ -80,6 +91,7 @@ with tab_del:
         if st.button("🗑️ Permanently Delete"):
             db.collection('parking_slots').document(d_slot).delete(); st.rerun()
 
+# --- MAIN DASHBOARD ---
 st.title("🏙️ SPMS: Smart City Command Center")
 st.caption("Developed by Bilal Arshad & Faraz Ahsan | Group 4650")
 
